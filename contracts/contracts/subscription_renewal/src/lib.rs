@@ -24,6 +24,13 @@ struct ExecutorKey {
     sub_id: u64,
 }
 
+/// Storage key for renewal window: sub_id
+#[contracttype]
+#[derive(Clone)]
+struct WindowKey {
+    sub_id: u64,
+}
+
 /// Renewal approval bound to subscription, amount, and expiration
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -32,6 +39,14 @@ pub struct RenewalApproval {
     pub max_spend: i128,
     pub expires_at: u32,
     pub used: bool,
+}
+
+/// Renewal time window
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RenewalWindow {
+    pub billing_start: u64,
+    pub billing_end: u64,
 }
 
 /// Represents the current state of a subscription
@@ -102,6 +117,13 @@ pub struct ExecutorAssigned {
 #[contractevent]
 pub struct ExecutorRemoved {
     pub sub_id: u64,
+}
+
+#[contractevent]
+pub struct WindowUpdated {
+    pub sub_id: u64,
+    pub billing_start: u64,
+    pub billing_end: u64,
 }
 
 #[contract]
@@ -196,6 +218,44 @@ impl SubscriptionRenewalContract {
     /// Get executor for subscription
     pub fn get_executor(env: Env, sub_id: u64) -> Option<Address> {
         let key = ExecutorKey { sub_id };
+        env.storage().persistent().get(&key)
+    }
+
+    // ── Renewal window management ─────────────────────────────────
+
+    /// Set renewal window (owner only)
+    pub fn set_window(env: Env, sub_id: u64, billing_start: u64, billing_end: u64) {
+        let data: SubscriptionData = env
+            .storage()
+            .persistent()
+            .get(&sub_id)
+            .expect("Subscription not found");
+
+        data.owner.require_auth();
+
+        if billing_start >= billing_end {
+            panic!("Invalid window: start must be before end");
+        }
+
+        let window = RenewalWindow {
+            billing_start,
+            billing_end,
+        };
+
+        let key = WindowKey { sub_id };
+        env.storage().persistent().set(&key, &window);
+
+        WindowUpdated {
+            sub_id,
+            billing_start,
+            billing_end,
+        }
+        .publish(&env);
+    }
+
+    /// Get renewal window
+    pub fn get_window(env: Env, sub_id: u64) -> Option<RenewalWindow> {
+        let key = WindowKey { sub_id };
         env.storage().persistent().get(&key)
     }
 
@@ -338,6 +398,15 @@ impl SubscriptionRenewalContract {
         // Validate and consume approval
         if !Self::consume_approval(&env, sub_id, approval_id, amount) {
             panic!("Invalid or expired approval");
+        }
+
+        // Validate renewal window
+        let window_key = WindowKey { sub_id };
+        if let Some(window) = env.storage().persistent().get::<WindowKey, RenewalWindow>(&window_key) {
+            let current_time = env.ledger().timestamp();
+            if current_time < window.billing_start || current_time > window.billing_end {
+                panic!("Outside renewal window");
+            }
         }
 
         // If already failed, we can't renew
