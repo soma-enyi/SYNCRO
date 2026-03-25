@@ -47,8 +47,45 @@ const router = Router();
 router.use(authenticate);
 
 /**
- * GET /api/subscriptions
- * List user's subscriptions with optional filtering
+ * @openapi
+ * /api/subscriptions:
+ *   get:
+ *     tags: [Subscriptions]
+ *     summary: List subscriptions
+ *     description: Returns all subscriptions for the authenticated user with optional filtering.
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: status
+ *         schema: { type: string, enum: [active, cancelled, expired] }
+ *       - in: query
+ *         name: category
+ *         schema: { type: string }
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, default: 20 }
+ *       - in: query
+ *         name: offset
+ *         schema: { type: integer, default: 0 }
+ *     responses:
+ *       200:
+ *         description: List of subscriptions
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean }
+ *                 data:
+ *                   type: array
+ *                   items: { $ref: '#/components/schemas/Subscription' }
+ *                 pagination: { $ref: '#/components/schemas/Pagination' }
+ *       401:
+ *         description: Unauthorized
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
  */
 router.get("/", async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -81,8 +118,32 @@ router.get("/", async (req: AuthenticatedRequest, res: Response) => {
 });
 
 /**
- * GET /api/subscriptions/:id
- * Get single subscription by ID
+ * @openapi
+ * /api/subscriptions/{id}:
+ *   get:
+ *     tags: [Subscriptions]
+ *     summary: Get a subscription
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     responses:
+ *       200:
+ *         description: Subscription object
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean }
+ *                 data: { $ref: '#/components/schemas/Subscription' }
+ *       401:
+ *         description: Unauthorized
+ *       404:
+ *         description: Not found
  */
 router.get("/:id", validateSubscriptionOwnership, async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -110,8 +171,49 @@ router.get("/:id", validateSubscriptionOwnership, async (req: AuthenticatedReque
 });
 
 /**
- * POST /api/subscriptions
- * Create new subscription with idempotency support
+ * @openapi
+ * /api/subscriptions:
+ *   post:
+ *     tags: [Subscriptions]
+ *     summary: Create a subscription
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: header
+ *         name: Idempotency-Key
+ *         schema: { type: string }
+ *         description: Optional key to prevent duplicate submissions
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [name, price, billing_cycle]
+ *             properties:
+ *               name: { type: string, example: Netflix }
+ *               price: { type: number, example: 15.99 }
+ *               billing_cycle: { type: string, enum: [monthly, yearly, quarterly] }
+ *               renewal_url: { type: string, format: uri }
+ *               website_url: { type: string, format: uri }
+ *               logo_url: { type: string, format: uri }
+ *     responses:
+ *       201:
+ *         description: Subscription created
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean }
+ *                 data: { $ref: '#/components/schemas/Subscription' }
+ *                 blockchain: { $ref: '#/components/schemas/BlockchainResult' }
+ *       207:
+ *         description: Created but blockchain sync failed
+ *       400:
+ *         description: Validation error
+ *       401:
+ *         description: Unauthorized
  */
 router.post("/", async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -200,8 +302,54 @@ router.post("/", async (req: AuthenticatedRequest, res: Response) => {
 });
 
 /**
- * PATCH /api/subscriptions/:id
- * Update subscription with optimistic locking
+ * @openapi
+ * /api/subscriptions/{id}:
+ *   patch:
+ *     tags: [Subscriptions]
+ *     summary: Update a subscription
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *       - in: header
+ *         name: Idempotency-Key
+ *         schema: { type: string }
+ *       - in: header
+ *         name: If-Match
+ *         schema: { type: string }
+ *         description: Expected version for optimistic locking
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               name: { type: string }
+ *               price: { type: number }
+ *               billing_cycle: { type: string, enum: [monthly, yearly, quarterly] }
+ *               renewal_url: { type: string, format: uri }
+ *               website_url: { type: string, format: uri }
+ *               logo_url: { type: string, format: uri }
+ *     responses:
+ *       200:
+ *         description: Updated subscription
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean }
+ *                 data: { $ref: '#/components/schemas/Subscription' }
+ *                 blockchain: { $ref: '#/components/schemas/BlockchainResult' }
+ *       207:
+ *         description: Updated but blockchain sync failed
+ *       401:
+ *         description: Unauthorized
+ *       404:
+ *         description: Not found
  */
 router.patch("/:id", validateSubscriptionOwnership, async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -280,8 +428,27 @@ router.patch("/:id", validateSubscriptionOwnership, async (req: AuthenticatedReq
 });
 
 /**
- * DELETE /api/subscriptions/:id
- * Delete subscription
+ * @openapi
+ * /api/subscriptions/{id}:
+ *   delete:
+ *     tags: [Subscriptions]
+ *     summary: Delete a subscription
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     responses:
+ *       200:
+ *         description: Deleted
+ *       207:
+ *         description: Deleted but blockchain sync failed
+ *       401:
+ *         description: Unauthorized
+ *       404:
+ *         description: Not found
  */
 router.delete("/:id", validateSubscriptionOwnership, async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -320,8 +487,37 @@ router.delete("/:id", validateSubscriptionOwnership, async (req: AuthenticatedRe
 });
 
 /**
- * POST /api/subscriptions/:id/attach-gift-card
- * Attach gift card info to a subscription
+ * @openapi
+ * /api/subscriptions/{id}/attach-gift-card:
+ *   post:
+ *     tags: [Subscriptions]
+ *     summary: Attach a gift card to a subscription
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [giftCardHash, provider]
+ *             properties:
+ *               giftCardHash: { type: string }
+ *               provider: { type: string }
+ *     responses:
+ *       201:
+ *         description: Gift card attached
+ *       400:
+ *         description: Validation error
+ *       401:
+ *         description: Unauthorized
+ *       404:
+ *         description: Subscription not found
  */
 router.post('/:id/attach-gift-card', validateSubscriptionOwnership, async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -371,9 +567,33 @@ router.post('/:id/attach-gift-card', validateSubscriptionOwnership, async (req: 
 });
 
 /**
- * POST /api/subscriptions/:id/retry-sync
- * Retry blockchain sync for a subscription
- * Enforces cooldown period to prevent rapid repeated attempts
+ * @openapi
+ * /api/subscriptions/{id}/retry-sync:
+ *   post:
+ *     tags: [Subscriptions]
+ *     summary: Retry blockchain sync for a subscription
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     responses:
+ *       200:
+ *         description: Sync result
+ *       401:
+ *         description: Unauthorized
+ *       429:
+ *         description: Cooldown period active
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean }
+ *                 error: { type: string }
+ *                 retryAfter: { type: integer, description: Seconds to wait }
  */
 router.post("/:id/retry-sync", validateSubscriptionOwnership, async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -409,8 +629,33 @@ router.post("/:id/retry-sync", validateSubscriptionOwnership, async (req: Authen
 });
 
 /**
- * GET /api/subscriptions/:id/cooldown-status
- * Check if a subscription can be retried or if cooldown is active
+ * @openapi
+ * /api/subscriptions/{id}/cooldown-status:
+ *   get:
+ *     tags: [Subscriptions]
+ *     summary: Check retry cooldown status
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     responses:
+ *       200:
+ *         description: Cooldown status
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean }
+ *                 canRetry: { type: boolean }
+ *                 isOnCooldown: { type: boolean }
+ *                 timeRemainingSeconds: { type: integer, nullable: true }
+ *                 message: { type: string }
+ *       401:
+ *         description: Unauthorized
  */
 router.get("/:id/cooldown-status", validateSubscriptionOwnership, async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -441,8 +686,30 @@ function extractWaitTime(message: string): number {
 }
 
 /**
- * POST /api/subscriptions/:id/cancel
- * Cancel subscription with blockchain sync
+ * @openapi
+ * /api/subscriptions/{id}/cancel:
+ *   post:
+ *     tags: [Subscriptions]
+ *     summary: Cancel a subscription
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *       - in: header
+ *         name: Idempotency-Key
+ *         schema: { type: string }
+ *     responses:
+ *       200:
+ *         description: Cancelled
+ *       207:
+ *         description: Cancelled but blockchain sync failed
+ *       401:
+ *         description: Unauthorized
+ *       404:
+ *         description: Not found
  */
 router.post("/:id/cancel", validateSubscriptionOwnership, async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -509,8 +776,35 @@ router.post("/:id/cancel", validateSubscriptionOwnership, async (req: Authentica
 });
 
 /**
- * POST /api/subscriptions/bulk
- * Bulk operations (delete, update status, etc.)
+ * @openapi
+ * /api/subscriptions/bulk:
+ *   post:
+ *     tags: [Subscriptions]
+ *     summary: Bulk operations on subscriptions
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [operation, ids]
+ *             properties:
+ *               operation: { type: string, enum: [delete, update] }
+ *               ids:
+ *                 type: array
+ *                 items: { type: string, format: uuid }
+ *               data:
+ *                 type: object
+ *                 description: Required when operation is "update"
+ *     responses:
+ *       200:
+ *         description: Bulk operation results
+ *       400:
+ *         description: Validation error
+ *       401:
+ *         description: Unauthorized
  */
 router.post("/bulk", validateBulkSubscriptionOwnership, async (req: AuthenticatedRequest, res: Response) => {
   try {

@@ -1,6 +1,7 @@
 import express from 'express';
 import cookieParser from 'cookie-parser';
 import dotenv from 'dotenv';
+import swaggerUi from 'swagger-ui-express';
 // Load environment variables before importing other modules
 dotenv.config();
 
@@ -15,10 +16,14 @@ import simulationRoutes from './routes/simulation';
 import merchantRoutes from './routes/merchants';
 import teamRoutes from './routes/team';
 import auditRoutes from './routes/audit';
+import digestRoutes from './routes/digest';
+import mfaRoutes from './routes/mfa';
+import pushNotificationRoutes from './routes/push-notifications';
 import { monitoringService } from './services/monitoring-service';
 import { healthService } from './services/health-service';
 import { eventListener } from './services/event-listener';
 import { expiryService } from './services/expiry-service';
+import { swaggerSpec } from './swagger';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -55,6 +60,13 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
+// Swagger UI — available in all environments
+app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
+app.get('/api/docs.json', (_req, res) => {
+  res.setHeader('Content-Type', 'application/json');
+  res.send(swaggerSpec);
+});
+
 // API Routes
 app.use('/api/subscriptions', subscriptionRoutes);
 app.use('/api/risk-score', riskScoreRoutes);
@@ -62,14 +74,41 @@ app.use('/api/simulation', simulationRoutes);
 app.use('/api/merchants', merchantRoutes);
 app.use('/api/team', teamRoutes);
 app.use('/api/audit', auditRoutes);
+app.use('/api/digest', digestRoutes);
+app.use('/api/mfa', mfaRoutes);
+app.use('/api/notifications/push', pushNotificationRoutes);
 
 // API Routes (Public/Standard)
+/**
+ * @openapi
+ * /api/reminders/status:
+ *   get:
+ *     tags: [Reminders]
+ *     summary: Get reminder scheduler status
+ *     responses:
+ *       200:
+ *         description: Scheduler status object
+ */
 app.get('/api/reminders/status', (req, res) => {
   const status = schedulerService.getStatus();
   res.json(status);
 });
 
 // Admin Monitoring Endpoints (Read-only)
+/**
+ * @openapi
+ * /api/admin/metrics/subscriptions:
+ *   get:
+ *     tags: [Admin]
+ *     summary: Get subscription metrics
+ *     security:
+ *       - adminKey: []
+ *     responses:
+ *       200:
+ *         description: Subscription metrics
+ *       401:
+ *         description: Unauthorized
+ */
 app.get('/api/admin/metrics/subscriptions', adminAuth, async (req, res) => {
   try {
     const metrics = await monitoringService.getSubscriptionMetrics();
@@ -79,6 +118,20 @@ app.get('/api/admin/metrics/subscriptions', adminAuth, async (req, res) => {
   }
 });
 
+/**
+ * @openapi
+ * /api/admin/metrics/renewals:
+ *   get:
+ *     tags: [Admin]
+ *     summary: Get renewal metrics
+ *     security:
+ *       - adminKey: []
+ *     responses:
+ *       200:
+ *         description: Renewal metrics
+ *       401:
+ *         description: Unauthorized
+ */
 app.get('/api/admin/metrics/renewals', adminAuth, async (req, res) => {
   try {
     const metrics = await monitoringService.getRenewalMetrics();
@@ -88,6 +141,20 @@ app.get('/api/admin/metrics/renewals', adminAuth, async (req, res) => {
   }
 });
 
+/**
+ * @openapi
+ * /api/admin/metrics/activity:
+ *   get:
+ *     tags: [Admin]
+ *     summary: Get agent activity metrics
+ *     security:
+ *       - adminKey: []
+ *     responses:
+ *       200:
+ *         description: Agent activity
+ *       401:
+ *         description: Unauthorized
+ */
 app.get('/api/admin/metrics/activity', adminAuth, async (req, res) => {
   try {
     const metrics = await monitoringService.getAgentActivity();
@@ -97,7 +164,26 @@ app.get('/api/admin/metrics/activity', adminAuth, async (req, res) => {
   }
 });
 
-// Protocol Health Monitor: unified admin health (metrics, alerts, history)
+/**
+ * @openapi
+ * /api/admin/health:
+ *   get:
+ *     tags: [Admin]
+ *     summary: Get unified admin health status
+ *     security:
+ *       - adminKey: []
+ *     parameters:
+ *       - in: query
+ *         name: history
+ *         schema: { type: boolean, default: true }
+ *     responses:
+ *       200:
+ *         description: Healthy
+ *       401:
+ *         description: Unauthorized
+ *       503:
+ *         description: Unhealthy
+ */
 app.get('/api/admin/health', adminAuth, async (req, res) => {
   try {
     const includeHistory = req.query.history !== 'false';
@@ -110,7 +196,20 @@ app.get('/api/admin/health', adminAuth, async (req, res) => {
   }
 });
 
-// Manual trigger endpoints (for testing/admin - Should eventually be protected)
+/**
+ * @openapi
+ * /api/reminders/process:
+ *   post:
+ *     tags: [Reminders]
+ *     summary: Manually process reminders (admin)
+ *     security:
+ *       - adminKey: []
+ *     responses:
+ *       200:
+ *         description: Reminders processed
+ *       401:
+ *         description: Unauthorized
+ */
 app.post('/api/reminders/process', adminAuth, async (req, res) => {
   try {
     await reminderEngine.processReminders();
@@ -124,6 +223,30 @@ app.post('/api/reminders/process', adminAuth, async (req, res) => {
   }
 });
 
+/**
+ * @openapi
+ * /api/reminders/schedule:
+ *   post:
+ *     tags: [Reminders]
+ *     summary: Schedule reminders (admin)
+ *     security:
+ *       - adminKey: []
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               daysBefore:
+ *                 type: array
+ *                 items: { type: integer }
+ *                 default: [7, 3, 1]
+ *     responses:
+ *       200:
+ *         description: Reminders scheduled
+ *       401:
+ *         description: Unauthorized
+ */
 app.post('/api/reminders/schedule', adminAuth, async (req, res) => {
   try {
     const daysBefore = req.body.daysBefore || [7, 3, 1];
@@ -138,6 +261,20 @@ app.post('/api/reminders/schedule', adminAuth, async (req, res) => {
   }
 });
 
+/**
+ * @openapi
+ * /api/reminders/retry:
+ *   post:
+ *     tags: [Reminders]
+ *     summary: Process reminder retries (admin)
+ *     security:
+ *       - adminKey: []
+ *     responses:
+ *       200:
+ *         description: Retries processed
+ *       401:
+ *         description: Unauthorized
+ */
 app.post('/api/reminders/retry', adminAuth, async (req, res) => {
   try {
     await reminderEngine.processRetries();
@@ -161,6 +298,20 @@ function startHealthSnapshotInterval() {
   setTimeout(() => healthService.recordSnapshot().catch(() => {}), 5000);
 }
 
+/**
+ * @openapi
+ * /api/admin/expiry/process:
+ *   post:
+ *     tags: [Admin]
+ *     summary: Manually process subscription expiries (admin)
+ *     security:
+ *       - adminKey: []
+ *     responses:
+ *       200:
+ *         description: Expiries processed
+ *       401:
+ *         description: Unauthorized
+ */
 app.post('/api/admin/expiry/process', adminAuth, async (req, res) => {
   try {
     const result = await expiryService.processExpiries();
