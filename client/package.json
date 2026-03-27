@@ -9,7 +9,10 @@
     "start": "next start",
     "generate-pwa-icons": "node scripts/generate-pwa-icons.js",
     "generate-pwa-screenshot": "node scripts/generate-pwa-screenshot.js",
-    "generate-pwa-assets": "npm run generate-pwa-icons && npm run generate-pwa-screenshot"
+    "generate-pwa-assets": "npm run generate-pwa-icons && npm run generate-pwa-screenshot",
+    "e2e": "npx playwright test",
+    "e2e:headed": "npx playwright test --headed",
+    "e2e:report": "npx playwright show-report"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",
