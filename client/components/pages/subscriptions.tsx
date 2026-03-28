@@ -600,7 +600,7 @@ interface SubscriptionCardProps {
   guide?: CancellationGuide
 }
 
-function SubscriptionCard({
+export function SubscriptionCard({
   subscription: sub,
   onDelete,
   onManage,
