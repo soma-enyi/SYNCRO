@@ -4,6 +4,7 @@ import multer from 'multer';
 import { subscriptionService } from '../services/subscription-service';
 import { giftCardService } from '../services/gift-card-service';
 import { idempotencyService } from '../services/idempotency';
+import { notificationPreferenceService } from '../services/notification-preference-service';
 import { authenticate, AuthenticatedRequest } from '../middleware/auth';
 import { validateSubscriptionOwnership, validateBulkSubscriptionOwnership } from '../middleware/ownership';
 import { auditService } from '../services/audit-service';
@@ -23,7 +24,9 @@ const upload = multer({
   },
 });
 
-// Zod schema for URL fields — only http/https allowed
+// ── Zod schemas ───────────────────────────────────────────────────────────────
+
+// URL fields — only http/https allowed
 const safeUrlSchema = z
   .string()
   .url('Must be a valid URL')
@@ -36,10 +39,9 @@ const safeUrlSchema = z
         return false;
       }
     },
-    { message: 'URL must use http or https protocol' }
+    { message: 'URL must use http or https protocol' },
   );
 
-// Validation schema for subscription create input
 const createSubscriptionSchema = z.object({
   name: z.string().min(1),
   price: z.number(),
@@ -55,13 +57,32 @@ const createSubscriptionSchema = z.object({
   logo_url: safeUrlSchema.optional(),
 });
 
-// Validation schema for subscription update input
 const updateSubscriptionSchema = z.object({
   renewal_url: safeUrlSchema.optional(),
   website_url: safeUrlSchema.optional(),
   logo_url: safeUrlSchema.optional(),
 }).passthrough();
 
+const notificationPreferencesSchema = z.object({
+  reminder_days_before: z
+    .array(z.number().int().min(1).max(365))
+    .min(1)
+    .max(10)
+    .optional(),
+  channels: z
+    .array(z.enum(['email', 'push', 'telegram', 'slack']))
+    .min(1)
+    .optional(),
+  muted: z.boolean().optional(),
+  muted_until: z.string().datetime({ offset: true }).nullable().optional(),
+  custom_message: z.string().max(500).nullable().optional(),
+});
+
+const snoozeSchema = z.object({
+  until: z.string().datetime({ offset: true }),
+});
+
+// ── Router ────────────────────────────────────────────────────────────────────
 
 const router = Router();
 
@@ -72,7 +93,7 @@ router.use(authenticate);
  * GET /api/subscriptions
  * List user's subscriptions with optional filtering
  */
-router.get("/", async (req: AuthenticatedRequest, res: Response) => {
+router.get('/', async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { status, category, limit, offset } = req.query as Record<string, unknown>;
 
@@ -96,11 +117,10 @@ router.get("/", async (req: AuthenticatedRequest, res: Response) => {
       pagination: { total: result.total, limit: lim, offset: off },
     });
   } catch (error) {
-    logger.error("List subscriptions error:", error);
+    logger.error('List subscriptions error:', error);
     res.status(500).json({
       success: false,
-      error:
-        error instanceof Error ? error.message : "Failed to list subscriptions",
+      error: error instanceof Error ? error.message : 'Failed to list subscriptions',
     });
   }
 });
@@ -109,27 +129,21 @@ router.get("/", async (req: AuthenticatedRequest, res: Response) => {
  * GET /api/subscriptions/:id
  * Get single subscription by ID
  */
-router.get("/:id", validateSubscriptionOwnership, async (req: AuthenticatedRequest, res: Response) => {
+router.get('/:id', validateSubscriptionOwnership, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const subscription = await subscriptionService.getSubscription(
       req.user!.id,
-      Array.isArray(req.params.id) ? req.params.id[0] : req.params.id
+      Array.isArray(req.params.id) ? req.params.id[0] : req.params.id,
     );
 
-    res.json({
-      success: true,
-      data: subscription,
-    });
+    res.json({ success: true, data: subscription });
   } catch (error) {
-    logger.error("Get subscription error:", error);
+    logger.error('Get subscription error:', error);
     const statusCode =
-      error instanceof Error && error.message.includes("not found")
-        ? 404
-        : 500;
+      error instanceof Error && error.message.includes('not found') ? 404 : 500;
     res.status(statusCode).json({
       success: false,
-      error:
-        error instanceof Error ? error.message : "Failed to get subscription",
+      error: error instanceof Error ? error.message : 'Failed to get subscription',
     });
   }
 });
@@ -138,12 +152,11 @@ router.get("/:id", validateSubscriptionOwnership, async (req: AuthenticatedReque
  * POST /api/subscriptions
  * Create new subscription with idempotency support
  */
-router.post("/", async (req: AuthenticatedRequest, res: Response) => {
+router.post('/', async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const idempotencyKey = req.headers["idempotency-key"] as string;
+    const idempotencyKey = req.headers['idempotency-key'] as string;
     const requestHash = idempotencyService.hashRequest(req.body);
 
-    // Check idempotency if key provided
     if (idempotencyKey) {
       const idempotencyCheck = await idempotencyService.checkIdempotency(
         idempotencyKey,
@@ -152,27 +165,24 @@ router.post("/", async (req: AuthenticatedRequest, res: Response) => {
       );
 
       if (idempotencyCheck.isDuplicate && idempotencyCheck.cachedResponse) {
-        logger.info("Returning cached response for idempotent request", {
+        logger.info('Returning cached response for idempotent request', {
           idempotencyKey,
           userId: req.user!.id,
         });
-
         return res
           .status(idempotencyCheck.cachedResponse.status)
           .json(idempotencyCheck.cachedResponse.body);
       }
     }
 
-    // Validate input
     const { name, price, billing_cycle } = req.body;
     if (!name || price === undefined || !billing_cycle) {
       return res.status(400).json({
         success: false,
-        error: "Missing required fields: name, price, billing_cycle",
+        error: 'Missing required fields: name, price, billing_cycle',
       });
     }
 
-    // Validate URL fields
     const urlValidation = createSubscriptionSchema.safeParse(req.body);
     if (!urlValidation.success) {
       return res.status(400).json({
@@ -181,26 +191,24 @@ router.post("/", async (req: AuthenticatedRequest, res: Response) => {
       });
     }
 
-    // Create subscription
     const result = await subscriptionService.createSubscription(
       req.user!.id,
       req.body,
-      idempotencyKey || undefined
+      idempotencyKey || undefined,
     );
 
     const responseBody = {
       success: true,
       data: result.subscription,
       blockchain: {
-        synced: result.syncStatus === "synced",
+        synced: result.syncStatus === 'synced',
         transactionHash: result.blockchainResult?.transactionHash,
         error: result.blockchainResult?.error,
       },
     };
 
-    const statusCode = result.syncStatus === "failed" ? 207 : 201;
+    const statusCode = result.syncStatus === 'failed' ? 207 : 201;
 
-    // Store idempotency record if key provided
     if (idempotencyKey) {
       await idempotencyService.storeResponse(
         idempotencyKey,
@@ -213,13 +221,10 @@ router.post("/", async (req: AuthenticatedRequest, res: Response) => {
 
     res.status(statusCode).json(responseBody);
   } catch (error) {
-    logger.error("Create subscription error:", error);
+    logger.error('Create subscription error:', error);
     res.status(500).json({
       success: false,
-      error:
-        error instanceof Error
-          ? error.message
-          : "Failed to create subscription",
+      error: error instanceof Error ? error.message : 'Failed to create subscription',
     });
   }
 });
@@ -228,12 +233,11 @@ router.post("/", async (req: AuthenticatedRequest, res: Response) => {
  * PATCH /api/subscriptions/:id
  * Update subscription with optimistic locking
  */
-router.patch("/:id", validateSubscriptionOwnership, async (req: AuthenticatedRequest, res: Response) => {
+router.patch('/:id', validateSubscriptionOwnership, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const idempotencyKey = req.headers["idempotency-key"] as string;
+    const idempotencyKey = req.headers['idempotency-key'] as string;
     const requestHash = idempotencyService.hashRequest(req.body);
 
-    // Check idempotency if key provided
     if (idempotencyKey) {
       const idempotencyCheck = await idempotencyService.checkIdempotency(
         idempotencyKey,
@@ -248,9 +252,8 @@ router.patch("/:id", validateSubscriptionOwnership, async (req: AuthenticatedReq
       }
     }
 
-    const expectedVersion = req.headers["if-match"] as string;
+    const expectedVersion = req.headers['if-match'] as string;
 
-    // Validate URL fields
     const urlValidation = updateSubscriptionSchema.safeParse(req.body);
     if (!urlValidation.success) {
       return res.status(400).json({
@@ -270,15 +273,14 @@ router.patch("/:id", validateSubscriptionOwnership, async (req: AuthenticatedReq
       success: true,
       data: result.subscription,
       blockchain: {
-        synced: result.syncStatus === "synced",
+        synced: result.syncStatus === 'synced',
         transactionHash: result.blockchainResult?.transactionHash,
         error: result.blockchainResult?.error,
       },
     };
 
-    const statusCode = result.syncStatus === "failed" ? 207 : 200;
+    const statusCode = result.syncStatus === 'failed' ? 207 : 200;
 
-    // Store idempotency record if key provided
     if (idempotencyKey) {
       await idempotencyService.storeResponse(
         idempotencyKey,
@@ -291,15 +293,12 @@ router.patch("/:id", validateSubscriptionOwnership, async (req: AuthenticatedReq
 
     res.status(statusCode).json(responseBody);
   } catch (error) {
-    logger.error("Update subscription error:", error);
+    logger.error('Update subscription error:', error);
     const statusCode =
-      error instanceof Error && error.message.includes("not found")
-        ? 404
-        : 500;
+      error instanceof Error && error.message.includes('not found') ? 404 : 500;
     res.status(statusCode).json({
       success: false,
-      error:
-        error instanceof Error ? error.message : "Failed to update subscription",
+      error: error instanceof Error ? error.message : 'Failed to update subscription',
     });
   }
 });
@@ -308,38 +307,32 @@ router.patch("/:id", validateSubscriptionOwnership, async (req: AuthenticatedReq
  * DELETE /api/subscriptions/:id
  * Delete subscription
  */
-router.delete("/:id", validateSubscriptionOwnership, async (req: AuthenticatedRequest, res: Response) => {
+router.delete('/:id', validateSubscriptionOwnership, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const result = await subscriptionService.deleteSubscription(
       req.user!.id,
-      Array.isArray(req.params.id) ? req.params.id[0] : req.params.id
+      Array.isArray(req.params.id) ? req.params.id[0] : req.params.id,
     );
 
     const responseBody = {
       success: true,
-      message: "Subscription deleted",
+      message: 'Subscription deleted',
       blockchain: {
-        synced: result.syncStatus === "synced",
+        synced: result.syncStatus === 'synced',
         transactionHash: result.blockchainResult?.transactionHash,
         error: result.blockchainResult?.error,
       },
     };
 
-    const statusCode = result.syncStatus === "failed" ? 207 : 200;
-
+    const statusCode = result.syncStatus === 'failed' ? 207 : 200;
     res.status(statusCode).json(responseBody);
   } catch (error) {
-    logger.error("Delete subscription error:", error);
+    logger.error('Delete subscription error:', error);
     const statusCode =
-      error instanceof Error && error.message.includes("not found")
-        ? 404
-        : 500;
+      error instanceof Error && error.message.includes('not found') ? 404 : 500;
     res.status(statusCode).json({
       success: false,
-      error:
-        error instanceof Error
-          ? error.message
-          : "Failed to delete subscription",
+      error: error instanceof Error ? error.message : 'Failed to delete subscription',
     });
   }
 });
@@ -354,8 +347,8 @@ router.post('/:id/attach-gift-card', validateSubscriptionOwnership, async (req: 
     if (!subscriptionId) {
       return res.status(400).json({ success: false, error: 'Subscription ID required' });
     }
-    const { giftCardHash, provider } = req.body;
 
+    const { giftCardHash, provider } = req.body;
     if (!giftCardHash || !provider) {
       return res.status(400).json({
         success: false,
@@ -367,15 +360,13 @@ router.post('/:id/attach-gift-card', validateSubscriptionOwnership, async (req: 
       req.user!.id,
       subscriptionId,
       giftCardHash,
-      provider
+      provider,
     );
 
     if (!result.success) {
-      const statusCode = result.error?.includes('not found') || result.error?.includes('access denied') ? 404 : 400;
-      return res.status(statusCode).json({
-        success: false,
-        error: result.error,
-      });
+      const statusCode =
+        result.error?.includes('not found') || result.error?.includes('access denied') ? 404 : 400;
+      return res.status(statusCode).json({ success: false, error: result.error });
     }
 
     res.status(201).json({
@@ -397,14 +388,13 @@ router.post('/:id/attach-gift-card', validateSubscriptionOwnership, async (req: 
 
 /**
  * POST /api/subscriptions/:id/retry-sync
- * Retry blockchain sync for a subscription
- * Enforces cooldown period to prevent rapid repeated attempts
+ * Retry blockchain sync — enforces cooldown period
  */
-router.post("/:id/retry-sync", validateSubscriptionOwnership, async (req: AuthenticatedRequest, res: Response) => {
+router.post('/:id/retry-sync', validateSubscriptionOwnership, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const result = await subscriptionService.retryBlockchainSync(
       req.user!.id,
-      Array.isArray(req.params.id) ? req.params.id[0] : req.params.id
+      Array.isArray(req.params.id) ? req.params.id[0] : req.params.id,
     );
 
     res.json({
@@ -413,32 +403,29 @@ router.post("/:id/retry-sync", validateSubscriptionOwnership, async (req: Authen
       error: result.error,
     });
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : "Failed to retry sync";
-    
-    // Check if it's a cooldown error
-    if (errorMessage.includes("Cooldown period active")) {
-      logger.warn("Retry sync rejected due to cooldown:", errorMessage);
+    const errorMessage = error instanceof Error ? error.message : 'Failed to retry sync';
+
+    if (errorMessage.includes('Cooldown period active')) {
+      logger.warn('Retry sync rejected due to cooldown:', errorMessage);
       return res.status(429).json({
         success: false,
         error: errorMessage,
         retryAfter: extractWaitTime(errorMessage),
       });
     }
-    
-    logger.error("Retry sync error:", error);
-    res.status(500).json({
-      success: false,
-      error: errorMessage,
-    });
+
+    logger.error('Retry sync error:', error);
+    res.status(500).json({ success: false, error: errorMessage });
   }
 });
 
 /**
  * GET /api/subscriptions/:id/cooldown-status
- * Check if a subscription can be retried or if cooldown is active
+ * Check cooldown status for a subscription
  */
-router.get("/:id/cooldown-status", validateSubscriptionOwnership, async (req: AuthenticatedRequest, res: Response) => {
+router.get('/:id/cooldown-status', validateSubscriptionOwnership, async (req: AuthenticatedRequest, res: Response) => {
   try {
+    const cooldownStatus = await subscriptionService.checkRenewalCooldown(req.params.id);
     const cooldownStatus = await subscriptionService.checkRenewalCooldown(
       Array.isArray(req.params.id) ? req.params.id[0] : req.params.id,
     );
@@ -451,30 +438,23 @@ router.get("/:id/cooldown-status", validateSubscriptionOwnership, async (req: Au
       message: cooldownStatus.message,
     });
   } catch (error) {
-    logger.error("Cooldown status check error:", error);
+    logger.error('Cooldown status check error:', error);
     res.status(500).json({
       success: false,
-      error: error instanceof Error ? error.message : "Failed to check cooldown status",
+      error: error instanceof Error ? error.message : 'Failed to check cooldown status',
     });
   }
 });
-
-// Helper function to extract wait time from error message
-function extractWaitTime(message: string): number {
-  const match = message.match(/wait (\d+) seconds/);
-  return match ? parseInt(match[1], 10) : 60;
-}
 
 /**
  * POST /api/subscriptions/:id/cancel
  * Cancel subscription with blockchain sync
  */
-router.post("/:id/cancel", validateSubscriptionOwnership, async (req: AuthenticatedRequest, res: Response) => {
+router.post('/:id/cancel', validateSubscriptionOwnership, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const idempotencyKey = req.headers["idempotency-key"] as string;
+    const idempotencyKey = req.headers['idempotency-key'] as string;
     const requestHash = idempotencyService.hashRequest(req.body);
 
-    // Check idempotency if key provided
     if (idempotencyKey) {
       const idempotencyCheck = await idempotencyService.checkIdempotency(
         idempotencyKey,
@@ -498,13 +478,13 @@ router.post("/:id/cancel", validateSubscriptionOwnership, async (req: Authentica
       success: true,
       data: result.subscription,
       blockchain: {
-        synced: result.syncStatus === "synced",
+        synced: result.syncStatus === 'synced',
         transactionHash: result.blockchainResult?.transactionHash,
         error: result.blockchainResult?.error,
       },
     };
 
-    const statusCode = result.syncStatus === "failed" ? 207 : 200;
+    const statusCode = result.syncStatus === 'failed' ? 207 : 200;
 
     if (idempotencyKey) {
       await idempotencyService.storeResponse(
@@ -518,17 +498,12 @@ router.post("/:id/cancel", validateSubscriptionOwnership, async (req: Authentica
 
     res.status(statusCode).json(responseBody);
   } catch (error) {
-    logger.error("Cancel subscription error:", error);
+    logger.error('Cancel subscription error:', error);
     const statusCode =
-      error instanceof Error && error.message.includes("not found")
-        ? 404
-        : 500;
+      error instanceof Error && error.message.includes('not found') ? 404 : 500;
     res.status(statusCode).json({
       success: false,
-      error:
-        error instanceof Error
-          ? error.message
-          : "Failed to cancel subscription",
+      error: error instanceof Error ? error.message : 'Failed to cancel subscription',
     });
   }
 });
@@ -695,14 +670,14 @@ router.post("/:id/resume", validateSubscriptionOwnership, async (req: Authentica
  * POST /api/subscriptions/bulk
  * Bulk operations (delete, update status, etc.)
  */
-router.post("/bulk", validateBulkSubscriptionOwnership, async (req: AuthenticatedRequest, res: Response) => {
+router.post('/bulk', validateBulkSubscriptionOwnership, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { operation, ids, data } = req.body;
 
     if (!operation || !ids || !Array.isArray(ids)) {
       return res.status(400).json({
         success: false,
-        error: "Missing required fields: operation, ids",
+        error: 'Missing required fields: operation, ids',
       });
     }
 
@@ -713,11 +688,11 @@ router.post("/bulk", validateBulkSubscriptionOwnership, async (req: Authenticate
       try {
         let result;
         switch (operation) {
-          case "delete":
+          case 'delete':
             result = await subscriptionService.deleteSubscription(req.user!.id, id);
             break;
-          case "update":
-            if (!data) throw new Error("Update data required");
+          case 'update':
+            if (!data) throw new Error('Update data required');
             result = await subscriptionService.updateSubscription(req.user!.id, id, data);
             break;
           default:
@@ -735,13 +710,107 @@ router.post("/bulk", validateBulkSubscriptionOwnership, async (req: Authenticate
       errors: errors.length > 0 ? errors : undefined,
     });
   } catch (error) {
-    logger.error("Bulk operation error:", error);
+    logger.error('Bulk operation error:', error);
     res.status(500).json({
       success: false,
-      error: error instanceof Error ? error.message : "Failed to perform bulk operation",
+      error: error instanceof Error ? error.message : 'Failed to perform bulk operation',
     });
   }
 });
+
+/**
+ * PATCH /api/subscriptions/:id/notification-preferences
+ * Create or update per-subscription notification preferences
+ */
+router.patch(
+  '/:id/notification-preferences',
+  validateSubscriptionOwnership,
+  async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const validation = notificationPreferencesSchema.safeParse(req.body);
+      if (!validation.success) {
+        return res.status(400).json({
+          success: false,
+          error: validation.error.errors.map((e) => e.message).join(', '),
+        });
+      }
+
+      const subscriptionId = Array.isArray(req.params.id)
+        ? req.params.id[0]
+        : req.params.id;
+
+      const preferences = await notificationPreferenceService.upsertPreferences(
+        subscriptionId,
+        validation.data,
+      );
+
+      res.json({ success: true, data: preferences });
+    } catch (error) {
+      logger.error('Update notification preferences error:', error);
+      res.status(500).json({
+        success: false,
+        error:
+          error instanceof Error
+            ? error.message
+            : 'Failed to update notification preferences',
+      });
+    }
+  },
+);
+
+/**
+ * POST /api/subscriptions/:id/snooze
+ * Mute reminders for a subscription until a specific date
+ */
+router.post(
+  '/:id/snooze',
+  validateSubscriptionOwnership,
+  async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const validation = snoozeSchema.safeParse(req.body);
+      if (!validation.success) {
+        return res.status(400).json({
+          success: false,
+          error: validation.error.errors.map((e) => e.message).join(', '),
+        });
+      }
+
+      const subscriptionId = Array.isArray(req.params.id)
+        ? req.params.id[0]
+        : req.params.id;
+
+      const preferences = await notificationPreferenceService.snooze(
+        subscriptionId,
+        validation.data.until,
+      );
+
+      res.json({
+        success: true,
+        data: preferences,
+        message: `Reminders snoozed until ${validation.data.until}`,
+      });
+    } catch (error) {
+      logger.error('Snooze subscription error:', error);
+
+      const isValidationError =
+        error instanceof Error &&
+        (error.message.includes('Invalid snooze date') ||
+          error.message.includes('must be in the future'));
+
+      res.status(isValidationError ? 400 : 500).json({
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to snooze subscription',
+      });
+    }
+  },
+);
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function extractWaitTime(message: string): number {
+  const match = message.match(/wait (\d+) seconds/);
+  return match ? parseInt(match[1], 10) : 60;
+}
 
 // ─── CSV Import ─────────────────────────────────────────────────────────────
 
