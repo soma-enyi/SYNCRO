@@ -3,6 +3,7 @@ import logger from '../config/logger';
 import { NotificationPayload, DeliveryResult } from '../types/reminder';
 import { withRetry, RetryableError, NonRetryableError } from '../utils/retry';
 import { sanitizeUrl } from '../utils/sanitize-url';
+import { complianceService } from './compliance-service';
 
 export interface EmailConfig {
   host?: string;
@@ -90,12 +91,17 @@ export class EmailService {
             throw new NonRetryableError('Email transporter not configured');
           }
 
+          const userId = (payload as any).userId || '';
+          const unsubscribeFooter = userId ? this.getUnsubscribeFooter(userId, 'reminders') : '';
+          const unsubscribeHeaders = userId ? this.getUnsubscribeHeaders(userId, 'reminders') : {};
+
           const info = await this.transporter.sendMail({
             from: this.fromEmail,
             to: recipientEmail,
             subject,
-            html,
+            html: html + unsubscribeFooter,
             text: this.getEmailText(payload),
+            headers: unsubscribeHeaders,
           });
 
           logger.info(`Email sent successfully to ${recipientEmail}`, {
@@ -130,6 +136,42 @@ export class EmailService {
         },
       };
     }
+  }
+
+  /**
+   * Generate unsubscribe footer HTML for emails
+   */
+  private getUnsubscribeFooter(userId: string, emailType: string): string {
+    const appUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+    const apiUrl = process.env.BACKEND_URL || 'http://localhost:3001';
+    const token = complianceService.generateUnsubscribeToken(userId, emailType);
+    const unsubscribeUrl = `${apiUrl}/api/compliance/unsubscribe?token=${token}`;
+    const preferencesUrl = `${appUrl}/email-preferences?token=${token}`;
+
+    return `
+    <div style="margin-top: 32px; padding-top: 16px; border-top: 1px solid #e5e7eb; text-align: center; font-size: 12px; color: #9ca3af;">
+      <p>You're receiving this because you have ${emailType} enabled in your Synchro account.</p>
+      <p>
+        <a href="${unsubscribeUrl}" style="color: #6366f1;">Unsubscribe from ${emailType}</a>
+        &nbsp;|&nbsp;
+        <a href="${preferencesUrl}" style="color: #6366f1;">Manage email preferences</a>
+      </p>
+    </div>
+  `;
+  }
+
+  /**
+   * Generate List-Unsubscribe headers for emails
+   */
+  private getUnsubscribeHeaders(userId: string, emailType: string): Record<string, string> {
+    const apiUrl = process.env.BACKEND_URL || 'http://localhost:3001';
+    const token = complianceService.generateUnsubscribeToken(userId, emailType);
+    const unsubscribeUrl = `${apiUrl}/api/compliance/unsubscribe?token=${token}`;
+
+    return {
+      'List-Unsubscribe': `<mailto:unsubscribe@syncro.app>, <${unsubscribeUrl}>`,
+      'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
+    };
   }
 
   /**
@@ -295,16 +337,27 @@ This is an automated reminder from Synchro.
    * Send a simple plain-text / HTML email.
    * Returns a resolved promise on success; rejects on failure.
    */
-  async sendSimpleEmail(to: string, subject: string, text: string): Promise<void> {
+  async sendSimpleEmail(
+    to: string,
+    subject: string,
+    text: string,
+    options?: { userId?: string; emailType?: string }
+  ): Promise<void> {
     if (!this.transporter) {
       throw new Error('Email transporter not configured');
     }
+    const userId = options?.userId || '';
+    const emailType = options?.emailType || 'notifications';
+    const unsubscribeFooter = userId ? this.getUnsubscribeFooter(userId, emailType) : '';
+    const unsubscribeHeaders = userId ? this.getUnsubscribeHeaders(userId, emailType) : {};
+
     await this.transporter.sendMail({
       from: this.fromEmail,
       to,
       subject,
       text,
-      html: `<p>${text}</p>`,
+      html: `<p>${text}</p>` + unsubscribeFooter,
+      headers: unsubscribeHeaders,
     });
     logger.info(`Simple email sent to ${to}`, { subject });
   }

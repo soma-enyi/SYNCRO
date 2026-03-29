@@ -20,6 +20,7 @@ import merchantRoutes from './routes/merchants';
 import teamRoutes from './routes/team';
 import auditRoutes from './routes/audit';
 import webhookRoutes from './routes/webhooks';
+import complianceRoutes from './routes/compliance';
 import tagsRoutes from './routes/tags';
 import { createExchangeRatesRouter } from './routes/exchange-rates';
 import { ExchangeRateService } from './services/exchange-rate/exchange-rate-service';
@@ -84,6 +85,7 @@ app.use('/api/audit', auditRoutes);
 app.use('/api/integrations/gmail', authenticate, gmailRouter)
 app.use('/api/integrations/outlook', authenticate, outlookRouter)
 app.use('/api/webhooks', webhookRoutes);
+app.use('/api/compliance', complianceRoutes);
 app.use('/api/tags', tagsRoutes);
 app.use('/api', tagsRoutes); // handles /api/subscriptions/:id/notes and /api/subscriptions/:id/tags
 app.use('/api/exchange-rates', createExchangeRatesRouter(exchangeRateService));

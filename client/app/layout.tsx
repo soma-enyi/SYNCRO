@@ -6,6 +6,8 @@ import { Geist, Geist_Mono } from "next/font/google";
 import { headers } from "next/headers";
 import "./globals.css";
 import { PWAProvider } from "../components/pwa-provider";
+import CookieConsent from "@/components/cookie-consent";
+import Link from "next/link";
 import { NonceProvider } from "../components/providers/nonce-provider";
 
 const _geist = GeistSans;
@@ -25,6 +27,21 @@ export default async function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+    return (
+        <html lang="en">
+            <body className={`font-sans antialiased`} suppressHydrationWarning>
+                <PWAProvider>
+                    {children}
+                </PWAProvider>
+                <footer className="py-4 text-center text-xs text-gray-500">
+                    <Link href="/privacy" className="hover:underline">Privacy Policy</Link>
+                    <span className="mx-2">·</span>
+                    <Link href="/terms" className="hover:underline">Terms of Service</Link>
+                </footer>
+                <CookieConsent />
+            </body>
+        </html>
+    );
   const headersList = await headers();
   const nonce = headersList.get("x-nonce") || "";
   return (
