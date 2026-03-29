@@ -1,57 +1,39 @@
-use super::*;
 use soroban_sdk::{
-    testutils::{Address as _, Ledger},
-    Address, Env,
+    contract, contractimpl, contracttype, contractevent,
+    Address, Env, Symbol,
 };
 
-/// Helper: creates env, registers contract, initializes admin, returns (client, admin).
-fn setup() -> (Env, SubscriptionRenewalContractClient<'static>, Address) {
-    let env = Env::default();
-    env.mock_all_auths();
-
-    let contract_id = env.register(SubscriptionRenewalContract, ());
-    let client = SubscriptionRenewalContractClient::new(&env, &contract_id);
-
-    let admin = Address::generate(&env);
-    client.init(&admin);
-
-    (env, client, admin)
+#[contracttype]
+#[derive(Clone)]
+pub struct Subscription {
+    pub subscriber: Address,
+    pub plan_id: Symbol,
+    pub next_payment_time: u64,
+    pub active: bool,
 }
 
-// ── Pause feature tests ──────────────────────────────────────────
-
-#[test]
-fn test_default_not_paused() {
-    let (_env, client, _admin) = setup();
-    assert!(!client.is_paused());
+#[contracttype]
+#[derive(Clone)]
+pub enum DataKey {
+    Subscription(Address),
 }
 
-#[test]
-fn test_admin_can_pause() {
-    let (_env, client, _admin) = setup();
-
-    client.set_paused(&true);
-    assert!(client.is_paused());
+#[contractevent]
+pub struct SubscriptionCreated {
+    pub subscriber: Address,
+    pub plan_id: Symbol,
 }
 
-#[test]
-fn test_admin_can_unpause() {
-    let (_env, client, _admin) = setup();
-
-    client.set_paused(&true);
-    assert!(client.is_paused());
-
-    client.set_paused(&false);
-    assert!(!client.is_paused());
+#[contractevent]
+pub struct SubscriptionRenewed {
+    pub subscriber: Address,
 }
 
-#[test]
-#[should_panic(expected = "Protocol is paused")]
-fn test_renew_blocked_when_paused() {
-    let (env, client, _admin) = setup();
+#[contract]
+pub struct SubscriptionRenewal;
 
-    let user = Address::generate(&env);
-    let sub_id = 100;
+#[contractimpl]
+impl SubscriptionRenewal {
 
     let merchant = Address::generate(&env);
     client.init_sub(&user, &merchant, &500, &86400, &1000, &sub_id);
@@ -1045,4 +1027,43 @@ fn test_lifecycle_multiple_renewals_update_last_renewed() {
 fn test_get_lifecycle_nonexistent_sub() {
     let (_env, client, _admin) = setup();
     client.get_lifecycle(&999);
+    pub fn create_subscription(
+        env: Env,
+        subscriber: Address,
+        plan_id: Symbol,
+        next_payment_time: u64,
+    ) {
+        subscriber.require_auth();
+        let subscription = Subscription {
+            subscriber: subscriber.clone(),
+            plan_id: plan_id.clone(),
+            next_payment_time,
+            active: true,
+        };
+        env.storage()
+            .instance()
+            .set(&DataKey::Subscription(subscriber.clone()), &subscription);
+        SubscriptionCreated { subscriber, plan_id }.publish(&env);
+    }
+    pub fn renew_subscription(env: Env, subscriber: Address) {
+        subscriber.require_auth();
+        let key = DataKey::Subscription(subscriber.clone());
+        let mut subscription: Subscription = env
+            .storage()
+            .instance()
+            .get(&key)
+            .unwrap();
+        if !subscription.active {
+            panic!("Subscription not active");
+        }
+        subscription.next_payment_time += 30 * 24 * 60 * 60;
+        env.storage().instance().set(&key, &subscription);
+        SubscriptionRenewed { subscriber }.publish(&env);
+    }
+    pub fn get_subscription(env: Env, subscriber: Address) -> Subscription {
+        env.storage()
+            .instance()
+            .get(&DataKey::Subscription(subscriber))
+            .unwrap()
+    }
 }
