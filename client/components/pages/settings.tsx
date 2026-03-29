@@ -12,8 +12,11 @@ import {
   DollarSign,
   Users,
   Building2,
+  Send,
 } from "lucide-react"
 import { useEffect, useState } from "react"
+import React, { useState, useEffect } from "react"
+import { apiGet, apiPatch } from "@/lib/api"
 import { type Currency, CURRENCY_NAMES, CURRENCY_SYMBOLS } from "@/lib/currency-utils"
 
 interface SettingsPageProps {
@@ -43,6 +46,7 @@ export default function SettingsPage({
   const [emailAlerts, setEmailAlerts] = useState(true)
   const [weeklyReports, setWeeklyReports] = useState(true)
   const [recommendations, setRecommendations] = useState(true)
+  const [initialLoad, setInitialLoad] = useState(true)
   const [showAddApiKey, setShowAddApiKey] = useState(false)
   const [newApiKey, setNewApiKey] = useState({ tool: "", key: "" })
   const [apiKeys, setApiKeys] = useState<Array<{ id: string; service_name: string; scopes: string[]; revoked: boolean; created_at?: string; last_used_at?: string; request_count?: number; visible?: boolean }>>([])
@@ -212,6 +216,8 @@ export default function SettingsPage({
     console.log("[v0] Rescanning email account:", id)
     setEmailAccounts(emailAccounts.map((e) => (e.id === id ? { ...e, lastScanned: "Just now" } : e)))
   }
+
+
 
   const handleUpgradeToTeam = () => {
     if (!teamSetup.workspaceName || !teamSetup.workDomain) {
@@ -632,6 +638,8 @@ export default function SettingsPage({
           </label>
         </div>
       </div>
+
+
 
       {/* API Keys Management */}
       <div className={`border rounded-xl p-6 ${darkMode ? "bg-gray-900 border-gray-800" : "bg-white border-gray-200"}`}>

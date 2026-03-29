@@ -88,10 +88,10 @@ const router = Router();
 
 // All routes require authentication
 router.use(authenticate);
+import * as bip39 from 'bip39';
 
 /**
- * GET /api/subscriptions
- * List user's subscriptions with optional filtering
+ * Generates a standard BIP39 12-word mnemonic phrase.
  */
 router.get('/', requireScope('subscriptions:read'), async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -810,76 +810,22 @@ router.post(
 function extractWaitTime(message: string): number {
   const match = message.match(/wait (\d+) seconds/);
   return match ? parseInt(match[1], 10) : 60;
+export function generateMnemonic(): string {
+  return bip39.generateMnemonic(128);
 }
 
-// ─── CSV Import ─────────────────────────────────────────────────────────────
-
 /**
- * GET /api/subscriptions/import/template
- * Download the CSV template.
+ * Validates a given mnemonic phrase (must be 12 words).
  */
-router.get('/import/template', authenticate, (_req: AuthenticatedRequest, res: Response) => {
-  res.setHeader('Content-Type', 'text/csv');
-  res.setHeader('Content-Disposition', 'attachment; filename="syncro-import-template.csv"');
-  res.send(CSV_TEMPLATE);
-});
+export function validateMnemonic(mnemonic: string): boolean {
+  if (!mnemonic || typeof mnemonic !== 'string') {
+    return false;
+  }
 
-/**
- * POST /api/subscriptions/import
- * Preview (default) or commit (commit=true) a CSV import.
- *
- * Query params:
- *   commit=true        — save valid rows instead of just previewing
- *   skip_dupes=false   — import duplicates anyway (default: skip)
- */
-router.post(
-  '/import',
-  authenticate,
-  upload.single('file'),
-  async (req: AuthenticatedRequest, res: Response) => {
-    try {
-      const userId = req.user?.id;
-      if (!userId) return res.status(401).json({ success: false, error: 'Unauthorized' });
+  const words = mnemonic.trim().split(/\s+/);
+  if (words.length !== 12) {
+    return false;
+  }
 
-      if (!req.file) {
-        return res.status(400).json({ success: false, error: 'No CSV file uploaded' });
-      }
-
-      const isCommit = req.query.commit === 'true';
-      const skipDupes = req.query.skip_dupes !== 'false';
-
-      // Always preview first (validates + deduplicates)
-      const preview = await previewImport(req.file.buffer, userId);
-
-      if (!isCommit) {
-        return res.status(200).json({ success: true, data: { preview } });
-      }
-
-      // Commit
-      const result = await commitImport(preview.rows, userId, skipDupes);
-
-      // Log to audit trail
-      await auditService.insertEntry({
-        userId,
-        action: 'csv_import',
-        resourceType: 'subscription',
-        metadata: {
-          imported: result.imported,
-          skipped: result.skipped,
-          errors: result.errors,
-          filename: req.file.originalname,
-        },
-      });
-
-      logger.info('CSV import committed', { userId, ...result });
-
-      return res.status(200).json({ success: true, data: result });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Import failed';
-      logger.error('CSV import error:', error);
-      return res.status(400).json({ success: false, error: message });
-    }
-  },
-);
-
-export default router;
+  return bip39.validateMnemonic(words.join(' '));
+}
