@@ -22,6 +22,7 @@ import auditRoutes from './routes/audit';
 import webhookRoutes from './routes/webhooks';
 import complianceRoutes from './routes/compliance';
 import tagsRoutes from './routes/tags';
+import apiKeysRoutes from './routes/api-keys';
 import { createExchangeRatesRouter } from './routes/exchange-rates';
 import { ExchangeRateService } from './services/exchange-rate/exchange-rate-service';
 import { FiatRateProvider } from './services/exchange-rate/fiat-provider';
@@ -76,6 +77,7 @@ app.get('/health', (req, res) => {
 });
 
 // API Routes
+app.use('/api/keys', apiKeysRoutes);
 app.use('/api/subscriptions', subscriptionRoutes);
 app.use('/api/risk-score', riskScoreRoutes);
 app.use('/api/simulation', simulationRoutes);

@@ -27,6 +27,7 @@ import { requireRole } from '../middleware/rbac';
 import { auditService } from '../services/audit-service';
 import { previewImport, commitImport, CSV_TEMPLATE } from '../services/csv-import-service';
 import { SUPPORTED_CURRENCIES } from '../constants/currencies';
+import { authenticate, AuthenticatedRequest, requireScope } from '../middleware/auth';
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 1 * 1024 * 1024 }, // 1 MB
@@ -184,12 +185,15 @@ router.get("/", async (req: AuthenticatedRequest, res: Response) => {
       cursor: req.query.cursor as string | undefined,
 router.get('/', async (req: AuthenticatedRequest, res: Response) => {
     const { status, category, limit, offset } = req.query as Record<string, unknown>;
+router.get('/', requireScope('subscriptions:read'), async (req: AuthenticatedRequest, res: Response) => {
     const allowedStatuses = new Set(['active','expired','cancelled','paused','trial']);
     const normalizedStatus =
       typeof status === 'string' && allowedStatuses.has(status) ? (status as any) : undefined;
     const normalizedCategory = typeof category === 'string' ? category : undefined;
     const lim = typeof limit === 'string' ? parseInt(limit) : undefined;
     const off = typeof offset === 'string' ? parseInt(offset) : undefined;
+
+    const result = await subscriptionService.listSubscriptions(req.user!.id, {
       status: normalizedStatus,
       category: normalizedCategory,
       limit: lim,
@@ -311,6 +315,7 @@ router.get('/:id', validateSubscriptionOwnership, async (req: AuthenticatedReque
     res.json({ success: true, data: subscription });
     logger.error('Get subscription error:', error);
       error instanceof Error && error.message.includes('not found') ? 404 : 500;
+router.get('/:id', requireScope('subscriptions:read'), validateSubscriptionOwnership, async (req: AuthenticatedRequest, res: Response) => {
       error: error instanceof Error ? error.message : 'Failed to get subscription',
     });
   }
@@ -371,6 +376,7 @@ router.post("/", async (req: AuthenticatedRequest, res: Response) => {
     // Check idempotency if key provided
 router.post('/', async (req: AuthenticatedRequest, res: Response) => {
     const idempotencyKey = req.headers['idempotency-key'] as string;
+router.post('/', requireScope('subscriptions:write'), async (req: AuthenticatedRequest, res: Response) => {
     if (idempotencyKey) {
       const idempotencyCheck = await idempotencyService.checkIdempotency(
         idempotencyKey,
@@ -518,6 +524,7 @@ router.patch("/:id", validateSubscriptionOwnership, async (req: AuthenticatedReq
     // Check idempotency if key provided
 router.patch('/:id', validateSubscriptionOwnership, async (req: AuthenticatedRequest, res: Response) => {
     const idempotencyKey = req.headers['idempotency-key'] as string;
+router.patch('/:id', requireScope('subscriptions:write'), validateSubscriptionOwnership, async (req: AuthenticatedRequest, res: Response) => {
     if (idempotencyKey) {
       const idempotencyCheck = await idempotencyService.checkIdempotency(
         idempotencyKey,
@@ -628,6 +635,7 @@ router.delete("/:id", validateSubscriptionOwnership, async (req: AuthenticatedRe
       Array.isArray(req.params.id) ? req.params.id[0] : req.params.id
       resolveParam(req.params.id)
 router.delete("/:id", validateSubscriptionOwnership, requireRole('owner', 'admin'), async (req: AuthenticatedRequest, res: Response) => {
+router.delete('/:id', requireScope('subscriptions:write'), validateSubscriptionOwnership, async (req: AuthenticatedRequest, res: Response) => {
       Array.isArray(req.params.id) ? req.params.id[0] : req.params.id,
     );
 
@@ -1121,6 +1129,7 @@ router.post("/:id/resume", validateSubscriptionOwnership, async (req: Authentica
  * Bulk operations (delete, update status, etc.)
  */
 router.post("/bulk", validateBulkSubscriptionOwnership, requireRole('owner', 'admin'), async (req: AuthenticatedRequest, res: Response) => {
+router.post('/bulk', validateBulkSubscriptionOwnership, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { operation, ids, data } = req.body;
 
@@ -1257,6 +1266,9 @@ router.post(
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+function extractWaitTime(message: string): number {
+  const match = message.match(/wait (\d+) seconds/);
+  return match ? parseInt(match[1], 10) : 60;
 export function generateMnemonic(): string {
   return bip39.generateMnemonic(128);
 }
