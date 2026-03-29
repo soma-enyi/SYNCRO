@@ -1,8 +1,4 @@
-import express from 'express';
-import cookieParser from 'cookie-parser';
-import dotenv from 'dotenv';
-// Load environment variables before importing other modules
-dotenv.config();
+import * as bip39 from 'bip39';
 
 import logger from './config/logger';
 import { requestIdMiddleware } from './middleware/requestContext';
@@ -170,69 +166,25 @@ function startHealthSnapshotInterval() {
   }, HEALTH_SNAPSHOT_INTERVAL_MS);
   // Record one snapshot shortly after startup
   setTimeout(() => healthService.recordSnapshot().catch(() => {}), 5000);
+/**
+ * Generates a standard BIP39 12-word mnemonic phrase.
+ */
+export function generateMnemonic(): string {
+  return bip39.generateMnemonic(128);
 }
 
-app.post('/api/admin/expiry/process', createAdminLimiter(), adminAuth, async (req, res) => {
-  try {
-    const result = await expiryService.processExpiries();
-    res.json({ success: true, data: result });
-  } catch (error) {
-    logger.error('Error processing expiries:', error);
-    res.status(500).json({
-      success: false,
-      error: error instanceof Error ? error.message : String(error),
-    });
-  }
-});
-
-
-// Start server
-const server = app.listen(PORT, async () => {
-  logger.info(`Server running on port ${PORT}`);
-  logger.info(`Environment: ${process.env.NODE_ENV || 'development'}`);
-
-  // Initialize rate limiting Redis store
-  try {
-    await RateLimiterFactory.initializeRedisStore();
-    logger.info('Rate limiting initialized successfully');
-  } catch (error) {
-    logger.warn('Rate limiting initialization failed, using memory store:', error);
+/**
+ * Validates a 12-word BIP39 mnemonic phrase.
+ */
+export function validateMnemonic(mnemonic: string): boolean {
+  if (!mnemonic || typeof mnemonic !== 'string') {
+    return false;
   }
 
-  // Start scheduler
-  schedulerService.start();
+  const words = mnemonic.trim().split(/\s+/);
+  if (words.length !== 12) {
+    return false;
+  }
 
-  // Start health metrics snapshot loop
-  startHealthSnapshotInterval();
-
-  // Start event listener
-  eventListener.start().catch(err => {
-    logger.error('Failed to start event listener:', err);
-  });
-
-  scheduleAutoResume();
-});
-
-
-
-// Graceful shutdown
-process.on('SIGTERM', () => {
-  logger.info('SIGTERM received, shutting down gracefully');
-  schedulerService.stop();
-  eventListener.stop();
-  server.close(() => {
-    logger.info('Server closed');
-    process.exit(0);
-  });
-});
-
-process.on('SIGINT', () => {
-  logger.info('SIGINT received, shutting down gracefully');
-  schedulerService.stop();
-  eventListener.stop();
-  server.close(() => {
-    logger.info('Server closed');
-    process.exit(0);
-  });
-});
-
+  return bip39.validateMnemonic(words.join(' '));
+}
