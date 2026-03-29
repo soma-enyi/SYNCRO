@@ -322,45 +322,20 @@ app.post('/api/admin/expiry/process', adminAuth, async (req, res) => {
       success: false,
       error: error instanceof Error ? error.message : String(error),
     });
+import * as bip39 from 'bip39';
+ * Generates a standard BIP39 12-word mnemonic phrase.
+export function generateMnemonic(): string {
+  return bip39.generateMnemonic(128);
+ * Validates a 12-word BIP39 mnemonic phrase.
+export function validateMnemonic(mnemonic: string): boolean {
+  if (!mnemonic || typeof mnemonic !== 'string') {
+    return false;
   }
-});
 
+  const words = mnemonic.trim().split(/\s+/);
+  if (words.length !== 12) {
+    return false;
+  }
 
-// Start server
-const server = app.listen(PORT, () => {
-  logger.info(`Server running on port ${PORT}`);
-  logger.info(`Environment: ${process.env.NODE_ENV || 'development'}`);
-
-  // Start scheduler
-  schedulerService.start();
-
-  // Start health metrics snapshot loop
-  startHealthSnapshotInterval();
-
-  // Start event listener
-  eventListener.start().catch(err => {
-    logger.error('Failed to start event listener:', err);
-  });
-});
-
-// Graceful shutdown
-process.on('SIGTERM', () => {
-  logger.info('SIGTERM received, shutting down gracefully');
-  schedulerService.stop();
-  eventListener.stop();
-  server.close(() => {
-    logger.info('Server closed');
-    process.exit(0);
-  });
-});
-
-process.on('SIGINT', () => {
-  logger.info('SIGINT received, shutting down gracefully');
-  schedulerService.stop();
-  eventListener.stop();
-  server.close(() => {
-    logger.info('Server closed');
-    process.exit(0);
-  });
-});
-
+  return bip39.validateMnemonic(words.join(' '));
+}

@@ -1,50 +1,4 @@
-import { Router, Response } from 'express';
-import { z } from 'zod';
-import { subscriptionService } from '../services/subscription-service';
-import { giftCardService } from '../services/gift-card-service';
-import { idempotencyService } from '../services/idempotency';
-import { authenticate, AuthenticatedRequest } from '../middleware/auth';
-import { validateSubscriptionOwnership, validateBulkSubscriptionOwnership } from '../middleware/ownership';
-import logger from '../config/logger';
-
-// Zod schema for URL fields — only http/https allowed
-const safeUrlSchema = z
-  .string()
-  .url('Must be a valid URL')
-  .refine(
-    (val) => {
-      try {
-        const { protocol } = new URL(val);
-        return protocol === 'http:' || protocol === 'https:';
-      } catch {
-        return false;
-      }
-    },
-    { message: 'URL must use http or https protocol' }
-  );
-
-// Validation schema for subscription create input
-const createSubscriptionSchema = z.object({
-  name: z.string().min(1),
-  price: z.number(),
-  billing_cycle: z.enum(['monthly', 'yearly', 'quarterly']),
-  renewal_url: safeUrlSchema.optional(),
-  website_url: safeUrlSchema.optional(),
-  logo_url: safeUrlSchema.optional(),
-});
-
-// Validation schema for subscription update input
-const updateSubscriptionSchema = z.object({
-  renewal_url: safeUrlSchema.optional(),
-  website_url: safeUrlSchema.optional(),
-  logo_url: safeUrlSchema.optional(),
-}).passthrough();
-
-
-const router = Router();
-
-// All routes require authentication
-router.use(authenticate);
+import * as bip39 from 'bip39';
 
 /**
  * @openapi
@@ -710,70 +664,15 @@ function extractWaitTime(message: string): number {
  *         description: Unauthorized
  *       404:
  *         description: Not found
+ * Generates a standard BIP39 12-word mnemonic phrase.
+export function generateMnemonic(): string {
+  return bip39.generateMnemonic(128);
+ * Validates a given mnemonic phrase (must be 12 words).
  */
-router.post("/:id/cancel", validateSubscriptionOwnership, async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const idempotencyKey = req.headers["idempotency-key"] as string;
-    const requestHash = idempotencyService.hashRequest(req.body);
-
-    // Check idempotency if key provided
-    if (idempotencyKey) {
-      const idempotencyCheck = await idempotencyService.checkIdempotency(
-        idempotencyKey,
-        req.user!.id,
-        requestHash,
-      );
-
-      if (idempotencyCheck.isDuplicate && idempotencyCheck.cachedResponse) {
-        return res
-          .status(idempotencyCheck.cachedResponse.status)
-          .json(idempotencyCheck.cachedResponse.body);
-      }
-    }
-
-    const result = await subscriptionService.cancelSubscription(
-      req.user!.id,
-      req.params.id,
-    );
-
-    const responseBody = {
-      success: true,
-      data: result.subscription,
-      blockchain: {
-        synced: result.syncStatus === "synced",
-        transactionHash: result.blockchainResult?.transactionHash,
-        error: result.blockchainResult?.error,
-      },
-    };
-
-    const statusCode = result.syncStatus === "failed" ? 207 : 200;
-
-    if (idempotencyKey) {
-      await idempotencyService.storeResponse(
-        idempotencyKey,
-        req.user!.id,
-        requestHash,
-        statusCode,
-        responseBody,
-      );
-    }
-
-    res.status(statusCode).json(responseBody);
-  } catch (error) {
-    logger.error("Cancel subscription error:", error);
-    const statusCode =
-      error instanceof Error && error.message.includes("not found")
-        ? 404
-        : 500;
-    res.status(statusCode).json({
-      success: false,
-      error:
-        error instanceof Error
-          ? error.message
-          : "Failed to cancel subscription",
-    });
+export function validateMnemonic(mnemonic: string): boolean {
+  if (!mnemonic || typeof mnemonic !== 'string') {
+    return false;
   }
-});
 
 /**
  * @openapi
@@ -851,7 +750,10 @@ router.post("/bulk", validateBulkSubscriptionOwnership, async (req: Authenticate
       success: false,
       error: error instanceof Error ? error.message : "Failed to perform bulk operation",
     });
+  const words = mnemonic.trim().split(/\s+/);
+  if (words.length !== 12) {
+    return false;
   }
-});
 
-export default router;
+  return bip39.validateMnemonic(words.join(' '));
+}
