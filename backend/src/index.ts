@@ -9,6 +9,7 @@ import { requestIdMiddleware } from './middleware/requestContext';
 import { requestLoggerMiddleware } from './middleware/requestLogger';
 import { schedulerService } from './services/scheduler';
 import { reminderEngine } from './services/reminder-engine';
+import { notificationPreferenceService } from './services/notification-preference-service';
 import subscriptionRoutes from './routes/subscriptions';
 import riskScoreRoutes from './routes/risk-score';
 import simulationRoutes from './routes/simulation';
@@ -16,6 +17,11 @@ import merchantRoutes from './routes/merchants';
 import teamRoutes from './routes/team';
 import auditRoutes from './routes/audit';
 import webhookRoutes from './routes/webhooks';
+import tagsRoutes from './routes/tags';
+import { createExchangeRatesRouter } from './routes/exchange-rates';
+import { ExchangeRateService } from './services/exchange-rate/exchange-rate-service';
+import { FiatRateProvider } from './services/exchange-rate/fiat-provider';
+import { CryptoRateProvider } from './services/exchange-rate/crypto-provider';
 import { monitoringService } from './services/monitoring-service';
 import { healthService } from './services/health-service';
 import { eventListener } from './services/event-listener';
@@ -25,6 +31,11 @@ import { scheduleAutoResume } from './jobs/auto-resume';
 const app = express();
 const PORT = process.env.PORT || 3001;
 const ADMIN_API_KEY = process.env.ADMIN_API_KEY || 'development-admin-key';
+
+const exchangeRateService = new ExchangeRateService([
+  new FiatRateProvider(),
+  new CryptoRateProvider(),
+]);
 
 // CORS configuration
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
@@ -49,7 +60,6 @@ app.use(express.urlencoded({ extended: true }));
 app.use(requestIdMiddleware);
 app.use(requestLoggerMiddleware);
 
-
 import { adminAuth } from './middleware/admin';
 import { createAdminLimiter, RateLimiterFactory } from './middleware/rate-limit-factory';
 
@@ -66,6 +76,9 @@ app.use('/api/merchants', merchantRoutes);
 app.use('/api/team', teamRoutes);
 app.use('/api/audit', auditRoutes);
 app.use('/api/webhooks', webhookRoutes);
+app.use('/api/tags', tagsRoutes);
+app.use('/api', tagsRoutes); // handles /api/subscriptions/:id/notes and /api/subscriptions/:id/tags
+app.use('/api/exchange-rates', createExchangeRatesRouter(exchangeRateService));
 
 // API Routes (Public/Standard)
 app.get('/api/reminders/status', (req, res) => {
@@ -114,6 +127,8 @@ app.get('/api/admin/health', createAdminLimiter(), adminAuth, async (req, res) =
   }
 });
 
+// Manual trigger endpoints (admin-protected)
+app.post('/api/reminders/process', adminAuth, async (req, res) => {
 // Manual trigger endpoints (for testing/admin - Should eventually be protected)
 app.post('/api/reminders/process', createAdminLimiter(), adminAuth, async (req, res) => {
   try {
@@ -155,6 +170,24 @@ app.post('/api/reminders/retry', createAdminLimiter(), adminAuth, async (req, re
   }
 });
 
+/**
+ * POST /api/reminders/snooze-cleanup
+ * Manually trigger expired snooze cleanup — auto-unmutes subscriptions
+ * whose muted_until date has passed. Called by cron or admin.
+ */
+app.post('/api/reminders/snooze-cleanup', adminAuth, async (req, res) => {
+  try {
+    await notificationPreferenceService.processExpiredSnoozes();
+    res.json({ success: true, message: 'Expired snoozes cleaned up' });
+  } catch (error) {
+    logger.error('Error processing expired snoozes:', error);
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+});
+
 // Protocol Health Monitor: record metrics snapshot periodically (historical storage)
 const HEALTH_SNAPSHOT_INTERVAL_MS = 15 * 60 * 1000; // 15 minutes
 function startHealthSnapshotInterval() {
@@ -177,7 +210,6 @@ app.post('/api/admin/expiry/process', createAdminLimiter(), adminAuth, async (re
     });
   }
 });
-
 
 // Start server
 const server = app.listen(PORT, async () => {
@@ -228,4 +260,3 @@ process.on('SIGINT', () => {
     process.exit(0);
   });
 });
-
