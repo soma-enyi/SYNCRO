@@ -116,6 +116,7 @@ class AuditLogger {
   /**
    * Flush queued audit events to backend
    */
+  public async flushAuditQueue(): Promise<void> {
   async flushAuditQueue(): Promise<void> {
     if (this.auditQueue.length === 0) {
       return

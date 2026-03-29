@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import { supabase } from '../config/database';
 import logger from '../config/logger';
 import { setRequestUserId } from './requestContext';
+import * as Sentry from '@sentry/node';
 
 export interface AuthenticatedRequest extends Request {
   user?: {
@@ -57,6 +58,8 @@ export async function authenticate(
       email: user.email || '',
     };
     setRequestUserId(user.id);
+    Sentry.setUser({ id: user.id, email: user.email });
+
 
     next();
   } catch (error) {
@@ -95,7 +98,9 @@ export async function optionalAuthenticate(
           email: user.email || '',
         };
         setRequestUserId(user.id);
+        Sentry.setUser({ id: user.id, email: user.email });
       }
+
     }
 
     next();

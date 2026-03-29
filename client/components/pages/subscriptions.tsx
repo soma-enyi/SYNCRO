@@ -1,5 +1,7 @@
 "use client"
 
+import { useState, useEffect } from "react"
+import { Edit2, Trash2, Mail, Clock, Copy, ShieldAlert, CheckCircle, Lock, Users, Calendar, Check } from "lucide-react"
 import { useState, useEffect, useRef } from "react"
 import { Edit2, Trash2, Mail, Clock, Copy, Lock, Users, Calendar, Check, Download, FileText, Upload } from "lucide-react"
 import { exportAllCSV, exportActiveCSV, exportDateRangeCSV } from "@/lib/csv-export"
@@ -763,31 +765,6 @@ export function SubscriptionCard({
           <p className={`text-xs ${darkMode ? "text-gray-400" : "text-gray-500"}`}>/Month</p>
         </div>
 
-        <div className="flex items-center gap-4">
-          <div className="flex flex-col items-end gap-1">
-            <button
-              onClick={() => onManage && onManage({ ...sub, toggleVisibility: true })}
-              className={`flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-md transition-colors ${
-                sub.visibility === 'team'
-                  ? "bg-blue-100 text-blue-700 hover:bg-blue-200"
-                  : "bg-gray-100 text-gray-600 hover:bg-gray-200"
-              }`}
-              title={sub.visibility === 'team' ? "Visible to Team" : "Private"}
-            >
-              {sub.visibility === 'team' ? <Users className="w-3 h-3" /> : <Lock className="w-3 h-3" />}
-              {sub.visibility === 'team' ? "Team" : "Private"}
-            </button>
-          </div>
-
-          <div className="text-right min-w-32">
-            <p className={`text-sm ${darkMode ? "text-gray-400" : "text-gray-600"}`}>
-              {sub.status === "expiring" ? `Expires in ${sub.renewsIn} days` : `Renewal in ${sub.renewsIn} days`}
-            </p>
-            <span className={`text-xs font-semibold ${sub.status === "expiring" ? "text-[#E86A33]" : "text-[#007A5C]"}`}>
-              {sub.status === "expiring" ? "Expiring" : "Active"}
-            </span>
-          </div>
-        </div>
 
         <div className="flex gap-2" role="group" aria-label={`Actions for ${sub.name}`}>
           <button
