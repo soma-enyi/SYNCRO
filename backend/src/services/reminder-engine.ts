@@ -299,6 +299,8 @@ export class ReminderEngine {
         }
       }
 
+
+
       await blockchainService.logReminderEvent(
         reminder.user_id,
         payload,
@@ -377,6 +379,7 @@ export class ReminderEngine {
         if (!result.success && result.metadata?.retryable === false) {
           await this.removeStalePushSubscription(delivery.user_id);
         }
+
       } else {
         await this.markDeliveryAsFailed(delivery.id, `Unknown channel: ${delivery.channel}`);
         return;
