@@ -1,9 +1,7 @@
 "use client"
 
-import { useState, useEffect } from "react"
-import { Edit2, Trash2, Mail, Clock, Copy, ShieldAlert, CheckCircle, Lock, Users, Calendar, Check } from "lucide-react"
 import { useState, useEffect, useRef } from "react"
-import { Edit2, Trash2, Mail, Clock, Copy, Lock, Users, Calendar, Check, Download, FileText, Upload } from "lucide-react"
+import { Edit2, Trash2, Mail, Clock, Copy, ShieldAlert, CheckCircle, Lock, Users, Calendar, Check, Download, FileText, Upload, AlertCircle } from "lucide-react"
 import { exportAllCSV, exportActiveCSV, exportDateRangeCSV } from "@/lib/csv-export"
 import { downloadSubscriptionPDF } from "@/lib/pdf-report"
 import CSVImportModal from "@/components/modals/csv-import-modal"
@@ -14,6 +12,7 @@ import { EmptyState } from "@/components/ui/empty-state"
 import { ErrorBoundary } from "@/components/ui/error-boundary"
 import CancellationGuideModal from "@/components/modals/cancellation-guide-modal"
 import { fetchAllCancellationGuides, type CancellationGuide } from "@/lib/supabase/cancellation-guides"
+import { StatusBadge, normalizeStatus } from "@/components/ui/status-badge"
 
 interface SubscriptionsPageProps {
   subscriptions?: any[]
@@ -496,19 +495,10 @@ export default function SubscriptionsPage({
                     darkMode={darkMode}
                     isDuplicate={duplicates.some((dup: any) => dup.subscriptions.some((s: any) => s.id === sub.id))}
                     unusedInfo={unusedSubscriptions.find((unused: any) => unused.id === sub.id)}
+                    onCancel={(s) => setSelectedSubForCancel(s)}
+                    guide={guides.find((g) => g.service_name.toLowerCase() === sub.name.toLowerCase())}
                   />
                 </ErrorBoundary>
-                  subscription={sub}
-                  onDelete={onDelete}
-                  onManage={onManage}
-                  selectedSubscriptions={selectedSubscriptions}
-                  onToggleSelect={onToggleSelect}
-                  darkMode={darkMode}
-                  isDuplicate={duplicates.some((dup: any) => dup.subscriptions.some((s: any) => s.id === sub.id))}
-                  unusedInfo={unusedSubscriptions.find((unused: any) => unused.id === sub.id)}
-                  onCancel={(s) => setSelectedSubForCancel(s)}
-                  guide={guides.find((g) => g.service_name.toLowerCase() === sub.name.toLowerCase())}
-                />
               ))}
             </div>
           )}
@@ -641,10 +631,17 @@ export function SubscriptionCard({
           ? "cancelled"
           : "active"
 
-  const difficultyColors = {
-    easy: "text-green-500 bg-green-500/10",
-    medium: "text-yellow-500 bg-yellow-500/10",
-    hard: "text-red-500 bg-red-500/10",
+  // WCAG-AA compliant difficulty badge tokens (≥ 4.5:1 contrast)
+  const difficultyColors: Record<string, string> = {
+    easy: darkMode
+      ? "text-[#bbf7d0] bg-[#14532d]"
+      : "text-[#166534] bg-[#dcfce7]",
+    medium: darkMode
+      ? "text-[#fde68a] bg-[#3b1c08]"
+      : "text-[#92400e] bg-[#fef3c7]",
+    hard: darkMode
+      ? "text-[#fca5a5] bg-[#7f1d1d]"
+      : "text-[#991b1b] bg-[#fee2e2]",
   }
 
   return (
@@ -673,9 +670,7 @@ export function SubscriptionCard({
           <div className="flex items-center gap-2">
             <h4 className={`font-semibold ${darkMode ? "text-white" : "text-gray-900"}`}>{sub.name}</h4>
             {sub.isTrial && (
-              <span className="bg-[#007A5C] text-white text-xs px-2 py-0.5 rounded-full font-semibold">
-                Trial
-              </span>
+              <StatusBadge status="trial" darkMode={darkMode} />
             )}
             {isDuplicate && (
               <span className="bg-[#FFD166] text-[#1E2A35] text-xs px-2 py-0.5 rounded-full font-semibold flex items-center gap-1">
@@ -690,11 +685,17 @@ export function SubscriptionCard({
               </span>
             )}
             {sub.latest_price_change && (
-              <span className={`text-xs px-2 py-0.5 rounded-full font-semibold flex items-center gap-1 ${
-                sub.latest_price_change.new_price > sub.latest_price_change.old_price 
-                  ? "bg-red-100 text-red-700" 
-                  : "bg-green-100 text-green-700"
-              }`}>
+              <span
+                className={`text-xs px-2 py-0.5 rounded-full font-semibold flex items-center gap-1 ${
+                  sub.latest_price_change.new_price > sub.latest_price_change.old_price
+                    ? darkMode
+                      ? "bg-[#7f1d1d] text-[#fca5a5]"
+                      : "bg-[#fee2e2] text-[#991b1b]"
+                    : darkMode
+                      ? "bg-[#14532d] text-[#bbf7d0]"
+                      : "bg-[#dcfce7] text-[#166534]"
+                }`}
+              >
                 {sub.latest_price_change.new_price > sub.latest_price_change.old_price ? "↑" : "↓"} Price Changed
               </span>
             )}
@@ -717,11 +718,11 @@ export function SubscriptionCard({
                 {guide.difficulty} to cancel
               </span>
             )}
-             {sub.status === "cancelled" && (
-              <span className="bg-gray-100 dark:bg-[#1E2A35] text-gray-500 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full flex items-center gap-1">
-                <CheckCircle className="w-2.5 h-2.5" />
-                Cancelled
-              </span>
+            {sub.status === "cancelled" && (
+              <StatusBadge status="cancelled" darkMode={darkMode} className="text-[10px] uppercase tracking-wider" />
+            )}
+            {sub.status === "paused" && (
+              <StatusBadge status="paused" darkMode={darkMode} className="text-[10px] uppercase tracking-wider" />
             )}
           </div>
           {sub.isTrial && sub.trialEndsAt && (
@@ -754,9 +755,11 @@ export function SubscriptionCard({
             <p className={`text-sm ${darkMode ? "text-gray-400" : "text-gray-600"}`}>
               {sub.status === "expiring" ? `Expires in ${sub.renewsIn} days` : `Renewal in ${sub.renewsIn} days`}
             </p>
-            <span className={`text-xs font-semibold ${sub.status === "expiring" ? "text-[#E86A33]" : "text-[#007A5C]"}`}>
-              {sub.status === "expiring" ? "Expiring" : "Active"}
-            </span>
+            <StatusBadge
+              status={normalizeStatus(sub.status)}
+              darkMode={darkMode}
+              className="mt-1"
+            />
           </div>
         </div>
 
