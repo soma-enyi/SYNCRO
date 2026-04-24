@@ -76,6 +76,13 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
+// API versioning transition middleware:
+// maps /api/v1/* to existing /api/* handlers for backward compatibility.
+app.use('/api/v1', (req, _res, next) => {
+  req.url = `/api${req.url}`;
+  next();
+});
+
 // API Routes
 app.use('/api/keys', apiKeysRoutes);
 app.use('/api/subscriptions', subscriptionRoutes);
